@@ -1,0 +1,20 @@
+{{define "head"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx-ext-ws@latest/ws.min.js"></script>
+{{end}}
+
+{{define "title"}}
+<title>{{.Title}}</title>
+{{end}}
+
+{{define "content"}}
+    <h1 class="text-2xl font-bold">{{.Title}}</h1>
+
+    <div class="flex flex-col flex-wrap gap-4" hx-ext="ws" ws-connect="/ws">
+        <div id="updated-timestamp">
+            {{template "updated-card" .UpdateTimestamp}}
+        </div>
+        <div id="system-info">
+            {{template "info-card" .SystemInfo}}
+        </div>
+    </div>
+{{end}}

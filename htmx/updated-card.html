@@ -1,0 +1,11 @@
+{{ define "updated-card" }}
+<div x-data="{ ts: new Date('{{.}}') }" class="max-w-lg rounded overflow-hidden shadow-sm bg-gray-100">
+    <div class="px-6 py-4">
+        <h2 class="font-bold text-xl mb-2">Last updated</h2>
+
+        <span x-text="new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).format(ts)">{{.}}</span>
+    </div>
+</div>
+{{ end }}
+
+{{template "updated-card" .}}

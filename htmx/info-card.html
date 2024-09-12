@@ -1,0 +1,38 @@
+{{ define "info-card" }}
+<div class="max-w-lg rounded overflow-hidden shadow-sm bg-gray-100">
+    <div class="px-6 py-4">
+        <h2 class="font-bold text-xl mb-2">System info</h2>
+        
+        <div class="grid grid-cols-2 gap-4 text-gray-700 text-base">
+            <div class="font-semibold">Host:</div>
+            <div>{{ .Host }}</div>
+            
+            <div class="font-semibold">OS:</div>
+            <div>{{ .OS }}</div>
+            
+            <div class="font-semibold">Total Memory:</div>
+            <div>{{ printf "%.2f" .TotalMem }} GB</div>
+            
+            <div class="font-semibold">Used Memory:</div>
+            <div>{{ printf "%.2f" .UsedMem }} GB</div>
+            
+            <div class="font-semibold">CPU Model:</div>
+            <div>{{ .CPUModel }}</div>
+            
+            <div class="font-semibold">CPU Cores:</div>
+            <div>{{ .CPUCores }}</div>
+            
+            <div class="font-semibold">CPU Used:</div>
+            <div>{{ printf "%.2f" .CPUUsed }}%</div>
+            
+            <div class="font-semibold">Total Disk:</div>
+            <div>{{ .TotalDisk }} GB</div>
+            
+            <div class="font-semibold">Used Disk:</div>
+            <div>{{ printf "%.2f" .UsedDisk }}%</div>
+        </div>
+    </div>
+</div>
+{{ end }}
+
+{{template "info-card" .}}

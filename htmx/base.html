@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{template "title" .}}</title>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@latest/dist/cdn.min.js" defer></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@latest/dist/tailwind.min.css" rel="stylesheet">
+    {{template "head" .}}
+</head>
+<body class="flex flex-col gap-4 m-4"></body>
+{{template "content" .}}
+</body>
+</html>
