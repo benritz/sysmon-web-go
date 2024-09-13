@@ -31,32 +31,32 @@ type SystemInfo struct {
 	UsedDisk  float64
 }
 
-func GetSystemInfo() (*SystemInfo, error) {
+func GetSystemInfo(cxt context.Context) (*SystemInfo, error) {
 	os := runtime.GOOS
 
-	vmMemStat, err := mem.VirtualMemory()
+	vmMemStat, err := mem.VirtualMemoryWithContext(cxt)
 	if err != nil {
 		return nil, err
 	}
 	totalMemory := float64(vmMemStat.Total) / 1024 / 1024 / 1024
 	usedMemory := float64(vmMemStat.Used) / 1024 / 1024 / 1024
 
-	hostStat, err := host.Info()
+	hostStat, err := host.InfoWithContext(cxt)
 	if err != nil {
 		return nil, err
 	}
 
-	cpuStat, err := cpu.Info()
+	cpuStat, err := cpu.InfoWithContext(cxt)
 	if err != nil {
 		return nil, err
 	}
 
-	cpuUsed, err := cpu.Percent(0, false)
+	cpuUsed, err := cpu.PercentWithContext(cxt, 0, false)
 	if err != nil {
 		return nil, err
 	}
 
-	diskStat, err := disk.Usage("/")
+	diskStat, err := disk.UsageWithContext(cxt, "/")
 	if err != nil {
 		return nil, err
 	}
@@ -83,21 +83,26 @@ type Subscribers struct {
 }
 
 type Server struct {
-	serveMux           http.ServeMux
-	maxMessages        int
-	subscribersMutex   sync.Mutex
-	subscribers        map[*Subscribers]struct{}
-	wsUpgrader         websocket.Upgrader
-	sysInfoMutex       sync.Mutex
-	sysInfo            *SystemInfo
-	sysInfoTimestamp   time.Time
-	sysInfoUpdaterDone chan struct{}
+	serveMux              http.ServeMux
+	maxMessages           int
+	subscribersMutex      sync.Mutex
+	subscribers           map[*Subscribers]struct{}
+	wsUpgrader            websocket.Upgrader
+	dashInfoMutex         sync.Mutex
+	dashInfo              *DashboardInfo
+	dashInfoUpdaterCancel context.CancelFunc
+}
+
+type DashboardInfo struct {
+	SystemInfo      *SystemInfo
+	CPUPercents     []float64
+	UpdateTimestamp time.Time
 }
 
 type DashboardPage struct {
 	Title           string
-	SystemInfo      *SystemInfo
-	UpdateTimestamp string
+	DashboardInfo   *DashboardInfo
+	UpdateTsRFC3339 string
 }
 
 func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) error {
@@ -110,7 +115,7 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) error {
 	log.Println("added subscriber")
 
 	if len(s.subscribers) == 1 {
-		s.startSysInfoUpdater()
+		s.dashInfoUpdaterCancel = s.startSysInfoUpdater()
 	}
 
 	s.subscribersMutex.Unlock()
@@ -129,7 +134,13 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) error {
 		log.Println("removed subscriber")
 		if len(s.subscribers) == 0 {
 			log.Println("stopping system info updater")
-			s.sysInfoUpdaterDone <- struct{}{}
+
+			if s.dashInfoUpdaterCancel == nil {
+				log.Panic("dashInfoUpdaterCancel is nil")
+			}
+
+			s.dashInfoUpdaterCancel()
+			s.dashInfoUpdaterCancel = nil
 		}
 		s.subscribersMutex.Unlock()
 	}()
@@ -166,55 +177,77 @@ func (s *Server) wsUpdate(elementId string, tmpl *template.Template, data any) (
 	return `<div hx-swap-oob="innerHTML:#` + elementId + `">` + builder.String() + `</div>`, nil
 }
 
-func (s *Server) getCurrentSystemInfo() (*SystemInfo, time.Time, error) {
-	s.sysInfoMutex.Lock()
-	defer s.sysInfoMutex.Unlock()
+func (s *Server) getCurrentDashboardInfo(cxt context.Context) (*DashboardInfo, error) {
+	s.dashInfoMutex.Lock()
+	defer s.dashInfoMutex.Unlock()
 
-	if s.sysInfo == nil || math.Ceil(time.Since(s.sysInfoTimestamp).Seconds()) >= 5 {
-		sysInfo, err := GetSystemInfo()
+	if s.dashInfo == nil || math.Ceil(time.Since(s.dashInfo.UpdateTimestamp).Seconds()) >= 5 {
+		sysInfo, err := GetSystemInfo(cxt)
 		if err != nil {
-			return nil, time.Time{}, err
+			return nil, err
 		}
 
-		s.sysInfo = sysInfo
-		s.sysInfoTimestamp = time.Now()
+		cpuPercents, err := cpu.PercentWithContext(cxt, 0, true)
+		if err != nil {
+			return nil, err
+		}
+
+		s.dashInfo = &DashboardInfo{
+			SystemInfo:      sysInfo,
+			CPUPercents:     cpuPercents,
+			UpdateTimestamp: time.Now(),
+		}
 	}
 
-	return s.sysInfo, s.sysInfoTimestamp, nil
+	return s.dashInfo, nil
 }
 
-func (s *Server) startSysInfoUpdater() {
+func (s *Server) startSysInfoUpdater() context.CancelFunc {
 	updatedCardTemplate := template.Must(template.ParseFiles("./htmx/updated-card.html"))
 	infoCardTemplate := template.Must(template.ParseFiles("./htmx/info-card.html"))
+	cpuUsageCardTemplate := template.Must(template.ParseFiles("./htmx/cpu-usage-card.html"))
 
-	go func() {
+	cxt, cancel := context.WithCancel(context.Background())
+
+	go func(cxt context.Context) error {
 		ticker := time.NewTicker(time.Second * 5)
 		defer ticker.Stop()
 
 		for {
 			select {
-			case <-s.sysInfoUpdaterDone:
+			case <-cxt.Done():
 				log.Println("stopped system info updater")
-				return
+				return cxt.Err()
 			case <-ticker.C:
 				log.Println("updating system info")
 
-				sysInfo, ts, err := s.getCurrentSystemInfo()
+				dashInfo, err := s.getCurrentDashboardInfo(cxt)
 
 				if err != nil {
 					log.Println("could not get system info:", err)
 				} else {
-					tsOut, err := s.wsUpdate("updated-timestamp", updatedCardTemplate, ts.UTC().Format(time.RFC3339))
+					var msg string
+
+					out, err := s.wsUpdate("updated-timestamp", updatedCardTemplate, dashInfo.UpdateTimestamp.UTC().Format(time.RFC3339))
 					if err != nil {
 						log.Println("could not update timestamp:", err)
+					} else {
+						msg += out
 					}
 
-					sysInfoOut, err := s.wsUpdate("system-info", infoCardTemplate, sysInfo)
+					out, err = s.wsUpdate("cpu-usage", cpuUsageCardTemplate, dashInfo.CPUPercents)
+					if err != nil {
+						log.Println("could not update cpu usage:", err)
+					} else {
+						msg += out
+					}
+
+					out, err = s.wsUpdate("system-info", infoCardTemplate, dashInfo.SystemInfo)
 					if err != nil {
 						log.Println("could not update sys info:", err)
+					} else {
+						msg += out
 					}
-
-					msg := tsOut + sysInfoOut
 
 					s.subscribersMutex.Lock()
 
@@ -227,9 +260,11 @@ func (s *Server) startSysInfoUpdater() {
 				}
 			}
 		}
-	}()
+	}(cxt)
 
 	log.Println("started system info updater")
+
+	return cancel
 }
 
 func (s *Server) Start() {
@@ -238,31 +273,31 @@ func (s *Server) Start() {
 
 func NewServer() *Server {
 	s := &Server{
-		maxMessages:        10,
-		subscribers:        make(map[*Subscribers]struct{}),
-		sysInfoUpdaterDone: make(chan struct{}),
-		wsUpgrader:         websocket.Upgrader{ReadBufferSize: 1024, WriteBufferSize: 1024},
+		maxMessages: 10,
+		subscribers: make(map[*Subscribers]struct{}),
+		wsUpgrader:  websocket.Upgrader{ReadBufferSize: 1024, WriteBufferSize: 1024},
 	}
 
 	dashboardTemplate := template.Must(template.ParseFiles(
 		"./htmx/base.html",
 		"./htmx/dashboard.html",
 		"./htmx/info-card.html",
+		"./htmx/cpu-usage-card.html",
 		"./htmx/updated-card.html",
 	))
 
 	s.serveMux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("serving dashboard")
 
-		sysInfo, ts, err := s.getCurrentSystemInfo()
+		dashInfo, err := s.getCurrentDashboardInfo(r.Context())
 		if err != nil {
-			log.Println("could not get system info:", err)
+			log.Println("could not get dashboard info:", err)
 		}
 
 		page := &DashboardPage{
 			Title:           "Dashboard",
-			SystemInfo:      sysInfo,
-			UpdateTimestamp: ts.UTC().Format(time.RFC3339),
+			DashboardInfo:   dashInfo,
+			UpdateTsRFC3339: dashInfo.UpdateTimestamp.UTC().Format(time.RFC3339),
 		}
 
 		err = dashboardTemplate.Execute(w, page)

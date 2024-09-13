@@ -1,0 +1,27 @@
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Go workspace file
+go.work
+
+# Go build cache
+go-build/
+
+# Go test cache
+*.test
+
+# IDE specific files
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Temporary files
+/tmp
+*.tmp
+*.temp
+
+# OS specific files
+.DS_Store
+Thumbs.db

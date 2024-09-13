@@ -3,7 +3,7 @@
 {{end}}
 
 {{define "title"}}
-<title>{{.Title}}</title>
+{{.Title}}
 {{end}}
 
 {{define "content"}}
@@ -11,10 +11,13 @@
 
     <div class="flex flex-col flex-wrap gap-4" hx-ext="ws" ws-connect="/ws">
         <div id="updated-timestamp">
-            {{template "updated-card" .UpdateTimestamp}}
+            {{template "updated-card" .UpdateTsRFC3339}}
         </div>
         <div id="system-info">
-            {{template "info-card" .SystemInfo}}
+            {{template "info-card" .DashboardInfo.SystemInfo}}
+        </div>
+        <div id="cpu-usage">
+            {{template "cpu-usage-card" .DashboardInfo.CPUPercents}}
         </div>
     </div>
 {{end}}
